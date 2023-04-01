@@ -21,14 +21,15 @@ download.file(f_url, destfile=t_file, mode='wb')
 # Load BF worksheet from temp file and restructure into "tidy" format 
 bfs_df <- read_xlsx(t_file, skip = 2) %>% 
   clean_names() %>% 
-  mutate(across(starts_with("BA"),
-              ~ as.numeric(as.character(.)))) %>% 
   rename_with(~ str_replace(.x, "ba", ""), starts_with("ba")) %>% 
-  gather("year","new_estab", 6:22) # collapse year columns into 1 variable: year
+  gather("year","new_estab", 6:22) %>%  # collapse year cols into 1 var: year
+  mutate(year = as.integer(year),
+         new_estab = as.integer(new_estab))
 
 # load county - lwa crosswalk 
 cty_lwa_xw <- read.csv(here("data","cty_lxa_xwalk.csv"),
                        colClasses=c(county_code = "character", lwa = "factor"))
+
 # filter to KY-only observations
 bfs_ky_df <- bfs_df %>%
   filter(fipstate == "21") %>%
@@ -46,6 +47,12 @@ cbp_df <- read.csv(here("data","CBP2020.CB2000CBP-Data.csv"),
          area_code = str_replace(area_code,"S21","000"),
          year = as.integer(year),
          estab = as.integer(estab))
+
+# Add baseline establishments (2020) from CBP, and calc 2021 new as % of base
+bfs_ky_df <- bfs_ky_df %>% 
+  left_join(select(cbp_df, c(area_code,year, estab)), 
+            by = c("fipscty" = "area_code", "year")) %>% 
+  mutate(new_as_pct_of_existing = new_estab / lag(estab) * 100)
 ```
 
 ## R Markdown
