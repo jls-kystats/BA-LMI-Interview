@@ -1,0 +1,70 @@
+---
+title: "2021 Ky Business Formations Analysis"
+author: "Larry Sturm"
+date: "2023-04-3"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(readxl)
+library(here)
+library(janitor)
+
+# Get Business Formations worksheet from Census site (create temp file)
+t_file = tempfile(fileext = ".xlsx")
+f_url <- "https://www.census.gov/econ/bfs/xlsx/bfs_county_apps_annual.xlsx"
+download.file(f_url, destfile=t_file, mode='wb')
+# Load BF worksheet from temp file and restructure into "tidy" format 
+bfs_df <- read_xlsx(t_file, skip = 2) %>% 
+  clean_names() %>% 
+  mutate(across(starts_with("BA"),
+              ~ as.numeric(as.character(.)))) %>% 
+  rename_with(~ str_replace(.x, "ba", ""), starts_with("ba")) %>% 
+  gather("year","new_estab", 6:22) # collapse year columns into 1 variable: year
+
+# load county - lwa crosswalk 
+cty_lwa_xw <- read.csv(here("data","cty_lxa_xwalk.csv"),
+                       colClasses=c(county_code = "character", lwa = "factor"))
+# filter to KY-only observations
+bfs_ky_df <- bfs_df %>%
+  filter(fipstate == "21") %>%
+  left_join(cty_lwa_xw, by = c("fipscty" = "county_code")) %>% 
+  mutate(county = str_replace(county, " County", "")) %>%
+  arrange(county_code,year)
+
+# Load US County Business Pattern data for 2020 from downloaded csv
+cbp_df <- read.csv(here("data","CBP2020.CB2000CBP-Data.csv"),
+                   na.strings = "null") %>%
+  clean_names() %>% 
+  filter(row_number() != 1) %>%    #  remove col header descriptor line
+  filter(naics2017 == "00" & lfo == "001" & empszes == "001") %>% 
+  mutate(area_code = str_sub(geo_id, -3, -1), .after = geo_id,
+         area_code = str_replace(area_code,"S21","000"),
+         year = as.integer(year),
+         estab = as.integer(estab))
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r New Business Formation by Year, echo=FALSE}
+ggplot(bfs_ky_df) +
+  geom_bar(mapping = aes(x = year, y = new_estab, fill = lwa), stat = "identity")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
