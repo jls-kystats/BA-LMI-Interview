@@ -27,8 +27,8 @@ cty_lwa_xw <- read.csv(here("data","cty_lxa_xwalk.csv"),
 cbp_df <- read.csv(here("data","CBP2020.CB2000CBP-Data.csv"),
                    na.strings = "null") %>%
   clean_names() %>% 
-  filter(row_number() != 1) %>%    #  remove col header descriptor line
-  filter(naics2017 == "00" & lfo == "001" & empszes == "001") %>% 
+  filter(row_number() != 1,    #  remove col header descriptor line
+         naics2017 == "00" & lfo == "001" & empszes == "001") %>% 
   mutate(area_code = str_sub(geo_id, -3, -1), .after = geo_id,
          area_code = str_replace(area_code,"S21","000"),
          year = as.integer(year),
@@ -52,20 +52,38 @@ bfs_ky_df <- bfs_df %>%
   filter(fipstate == "21") %>%
   left_join(cty_lwa_xw, by = c("fipscty" = "county_code")) %>% 
   mutate(county = str_replace(county, " County", "")) %>%
-  arrange(county_code,year)
+  arrange(county_code, year)
+
+# filter to KY plus 7 surrounding states
+bfs_surr_df <- bfs_df %>%
+  filter(fipstate %in% c("17", "18", "21", "29", "39", "47", "51", "56")) %>% 
+  arrange(county_code, year) %>% 
+  mutate(prev_nba = lag(new_estab)) %>% 
+  filter(!is.na(new_estab) & !is.na(prev_nba))
+
+# For YOY Pct chg KY vs other states
+table5 <- bfs_surr_df %>% 
+  filter(year == 2021) %>% 
+  group_by(state) %>% 
+  summarise(sum_prev = sum(prev_nba),
+            sum_curr = sum(new_estab)) %>%
+  mutate(yoy_pct_chg = round((sum_curr - sum_prev)/sum_prev*100,1)) %>% 
+  arrange(desc(yoy_pct_chg))
+
 
 # Add baseline establishments (2020) from CBP, and calc 2021 new as % of base
 bfs_ky_df <- bfs_ky_df %>% 
   left_join(select(cbp_df, c(area_code,year, estab)), 
-            by = c("fipscty" = "area_code", "year")) %>% 
-  mutate(existing_estabs = lag(estab),
-         new_as_pct_of_existing = round(new_estab / existing_estabs * 100,1),
-         new_yoy_pct = round(new_estab / lag(new_estab) * 100,1))
+            by = c("fipscty" = "area_code", "year")) %>%
+  arrange(county_code, year) %>% 
+  mutate(existing_estabs = lag(new_estab),
+         new_as_pct_of_existing = round((new_estab - existing_estabs)/ existing_estabs * 100,1),
+         new_yoy_pct = round((new_estab - lag(new_estab)) / lag(new_estab) * 100,1))
 
 # Produce Tables for analysis
 table1 <- bfs_ky_df %>%
   mutate(year = as.character(year)) %>% 
-  arrange(desc(year)) %>% 
+  arrange(year) %>% 
   group_by(year) %>% 
   summarise(new_bf = sum(new_estab)) %>% 
   mutate(pct_chg = round((new_bf - lag(new_bf))/lag(new_bf) * 100,1))
@@ -101,7 +119,7 @@ table4 <- bfs_ky_df %>%
 
 Each year the U.S. Census Bureau publishes a report of annual business applications at the county level as part of its Business Formations Statistics series. When analyzed over time, these data can provide valuable insight into new business activity. The most recent report, which was produced in June of 2022, provides counts of annual new business applications (NBAs) from 2005 through 2021. In Kentucky the annual number of NBAs was relatively constant from 2005 to 2015, with an average of 24,949 NBAs per year and a range from 23,401 (2009) to 25,883 (2006). However, over the most recent 6-year period - 2016 to 2021 - the pace of new applications increased significantly. During this period the average annual number of NBA's rose to 34,750, a 39% increase over the average during 2005 - 2015, In each year from 2016 through 2021, the number of NBAs was a minimum of `r round((27035-24949)/24949*100,1)`% higher than the previous average, and the largest number of NBAs submitted in a single year was during 2021, with 47,013 applications. (see Table 1 and Figure 1)
 
-At the county level in 2021, the majority of NBAs were concentrated in the largest metropolitan areas of the state. Jefferson, Fayette and Warren counties recorded `r format((12958+4730+1677),big.mark = ",", scientific=FALSE)` applications (`r round((12958+4730+1677)/25430*100,1)`% of the statewide total), while the fewest NBA's were submitted in Robertson, Elliott and Owsley counties: `r ( 12+17+22)`, or `r round((12+17+22)/25430*100,1)`% (Table 3). However, when assessing 2021 NBAs as a percentage of submissions in the previous year, it is evident that the increase in applications was not limited to the largest cities (Tables 2 and 4). The largest percentage gains were found in counties outside the largest metropolitan areas, three of which recorded a 200+ percent increase in 2021: Nicholas (278%), McLean (232%) and Wayne (214%).  Within the state's ten Local Workforce Development Areas (LWAs), each LWA registered a significant year-over-year percentage increase in 2021. The largest increase was found in the Cumberlands LWA, which recorded 2,693 applications - 35.5% more than in 2020. Applications in the W. Ky (3,693) and South Central (3,061) LWAs also increased more than 30% compared to 2020. Overall, in 2021 every LWA in the state recorded no less than a 22.7 increase in NBAs compared to the previous year (Table 4).
+At the county level in 2021, the majority of NBAs were concentrated in the largest metropolitan areas of the state. Jefferson, Fayette and Warren counties recorded `r format((12958+4730+1677),big.mark = ",", scientific=FALSE)` applications (`r round((12958+4730+1677)/25430*100,1)`% of the statewide total), while the fewest NBA's were submitted in Robertson, Elliott and Owsley counties: `r ( 12+17+22)`, or `r round((12+17+22)/25430*100,1)`% (Table 3). However, when assessing 2021 NBAs as a percentage of submissions in the previous year, it is evident that the increase in applications was not limited to the largest cities (Tables 2 and 4). The largest percentage gains were found in counties outside the largest metropolitan areas, three of which recorded a 100+ percent increase in 2021: Nicholas (178%), McLean (132%) and Wayne (114%).  Within the state's ten Local Workforce Development Areas (LWAs), each LWA registered a significant year-over-year percentage increase in 2021. The largest increase was found in the Cumberlands LWA, which recorded 2,693 applications - 35.5% more than in 2020. Applications in the W. Ky (3,693) and South Central (3,061) LWAs also increased more than 30% compared to 2020. Overall, in 2021 every LWA in the state recorded no less than a 22.7 increase in NBAs compared to the previous year (Table 4).
 
 \newpage
 ```{r Table 1: New Business Formations by Year:  2005-2021}
