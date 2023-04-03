@@ -1,10 +1,11 @@
 ---
 title: "2021 Ky Business Formations Analysis"
 author: "Larry Sturm"
-date: "2023-04-3"
+date: "4/3/2023"
 output:
   html_document:
     df_print: paged
+  word_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -13,6 +14,26 @@ library(tidyverse)
 library(readxl)
 library(here)
 library(janitor)
+library(knitr)
+library(kableExtra)
+
+
+# load county - lwa crosswalk 
+cty_lwa_xw <- read.csv(here("data","cty_lxa_xwalk.csv"),
+                       colClasses=c(county_code = "character", lwa = "factor"))
+
+
+# Load US County Business Pattern data for 2020 from downloaded csv
+cbp_df <- read.csv(here("data","CBP2020.CB2000CBP-Data.csv"),
+                   na.strings = "null") %>%
+  clean_names() %>% 
+  filter(row_number() != 1) %>%    #  remove col header descriptor line
+  filter(naics2017 == "00" & lfo == "001" & empszes == "001") %>% 
+  mutate(area_code = str_sub(geo_id, -3, -1), .after = geo_id,
+         area_code = str_replace(area_code,"S21","000"),
+         year = as.integer(year),
+         estab = as.integer(estab))
+
 
 # Get Business Formations worksheet from Census site (create temp file)
 t_file = tempfile(fileext = ".xlsx")
@@ -26,10 +47,6 @@ bfs_df <- read_xlsx(t_file, skip = 2) %>%
   mutate(year = as.integer(year),
          new_estab = as.integer(new_estab))
 
-# load county - lwa crosswalk 
-cty_lwa_xw <- read.csv(here("data","cty_lxa_xwalk.csv"),
-                       colClasses=c(county_code = "character", lwa = "factor"))
-
 # filter to KY-only observations
 bfs_ky_df <- bfs_df %>%
   filter(fipstate == "21") %>%
@@ -37,41 +54,100 @@ bfs_ky_df <- bfs_df %>%
   mutate(county = str_replace(county, " County", "")) %>%
   arrange(county_code,year)
 
-# Load US County Business Pattern data for 2020 from downloaded csv
-cbp_df <- read.csv(here("data","CBP2020.CB2000CBP-Data.csv"),
-                   na.strings = "null") %>%
-  clean_names() %>% 
-  filter(row_number() != 1) %>%    #  remove col header descriptor line
-  filter(naics2017 == "00" & lfo == "001" & empszes == "001") %>% 
-  mutate(area_code = str_sub(geo_id, -3, -1), .after = geo_id,
-         area_code = str_replace(area_code,"S21","000"),
-         year = as.integer(year),
-         estab = as.integer(estab))
-
 # Add baseline establishments (2020) from CBP, and calc 2021 new as % of base
 bfs_ky_df <- bfs_ky_df %>% 
   left_join(select(cbp_df, c(area_code,year, estab)), 
             by = c("fipscty" = "area_code", "year")) %>% 
-  mutate(new_as_pct_of_existing = new_estab / lag(estab) * 100)
+  mutate(existing_estabs = lag(estab),
+         new_as_pct_of_existing = round(new_estab / existing_estabs * 100,1),
+         new_yoy_pct = round(new_estab / lag(new_estab) * 100,1))
+
+# Produce Tables for analysis
+table1 <- bfs_ky_df %>%
+  mutate(year = as.character(year)) %>% 
+  arrange(desc(year)) %>% 
+  group_by(year) %>% 
+  summarise(new_bf = sum(new_estab)) %>% 
+  mutate(pct_chg = round((new_bf - lag(new_bf))/lag(new_bf) * 100,1))
+
+table1_early_mean_nba <- table1 %>% filter(year < 2016) %>% summarise(mean_nba = mean(new_bf))
+table1_late_mean_nba <- table1 %>% filter(year >= 2016) %>% summarise(mean_nba = mean(new_bf))
+
+table2 <- bfs_ky_df %>%
+  select(year, county, lwa, new_estab, new_yoy_pct) %>% 
+  filter(year == 2021) %>% 
+  mutate(year = as.character(year)) %>% 
+  arrange(desc(new_yoy_pct)) %>%
+  slice( unique(c(1:5, n() - 4:0)) )
+  #head(n = 5)
+
+table3 <- bfs_ky_df %>%
+  select(year, county, lwa, new_estab) %>% 
+  filter(year == 2021) %>% 
+  mutate(year = as.character(year)) %>% 
+  arrange(desc(new_estab)) %>% 
+  slice( unique(c(1:5, n() - 4:0)) )
+
+table4 <- bfs_ky_df %>%
+  mutate(prior_yr_est = lag(new_estab)) %>% 
+  filter(year == 2021) %>%
+  group_by(lwa) %>% 
+  summarise(new_20 = sum(prior_yr_est),
+            estabs_eoy_2020 = sum(existing_estabs),
+            new_21 = sum(new_estab)) %>% 
+  mutate(pct_chg = round((new_21 - new_20)/new_20 * 100,1)) %>% 
+  arrange(desc(pct_chg))
 ```
 
-## R Markdown
+Each year the U.S. Census Bureau publishes a report of annual business applications at the county level as part of its Business Formations Statistics series. When analyzed over time, these data can provide valuable insight into new business activity. The most recent report, which was produced in June of 2022, provides counts of annual new business applications (NBAs) from 2005 through 2021. In Kentucky the annual number of NBAs was relatively constant from 2005 to 2015, with an average of 24,949 NBAs per year and a range from 23,401 (2009) to 25,883 (2006). However, over the most recent 6-year period - 2016 to 2021 - the pace of new applications increased significantly. During this period the average annual number of NBA's rose to 34,750, a 39% increase over the average during 2005 - 2015, In each year from 2016 through 2021, the number of NBAs was a minimum of `r round((27035-24949)/24949*100,1)`% higher than the previous average, and the largest number of NBAs submitted in a single year was during 2021, with 47,013 applications. (see Table 1 and Figure 1)
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+At the county level in 2021, the majority of NBAs were concentrated in the largest metropolitan areas of the state. Jefferson, Fayette and Warren counties recorded `r format((12958+4730+1677),big.mark = ",", scientific=FALSE)` applications (`r round((12958+4730+1677)/25430*100,1)`% of the statewide total), while the fewest NBA's were submitted in Robertson, Elliott and Owsley counties: `r ( 12+17+22)`, or `r round((12+17+22)/25430*100,1)`% (Table 3). However, when assessing 2021 NBAs as a percentage of submissions in the previous year, it is evident that the increase in applications was not limited to the largest cities (Tables 2 and 4). The largest percentage gains were found in counties outside the largest metropolitan areas, three of which recorded a 200+ percent increase in 2021: Nicholas (278%), McLean (232%) and Wayne (214%).  Within the state's ten Local Workforce Development Areas (LWAs), each LWA registered a significant year-over-year percentage increase in 2021. The largest increase was found in the Cumberlands LWA, which recorded 2,693 applications - 35.5% more than in 2020. Applications in the W. Ky (3,693) and South Central (3,061) LWAs also increased more than 30% compared to 2020. Overall, in 2021 every LWA in the state recorded no less than a 22.7 increase in NBAs compared to the previous year (Table 4).
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+\newpage
+```{r Table 1: New Business Formations by Year:  2005-2021}
 
-```{r cars}
-summary(cars)
+kable(x = table1,
+      format.args = list(big.mark = ","),
+      col.names = c("Year", "New Bus Forms", "Pct Chg"),
+      caption = "Table 1 - KY New Business Formations by Year:  2005-2021") %>%
+   kable_classic(full_width = FALSE, html_font = "Cambria", font_size=16)
+  
 ```
 
-## Including Plots
+```{r Table 2: T/B 5 LWAs by Pct Chg 2021}
 
-You can also embed plots, for example:
+kable(x = table2,
+      format.args = list(big.mark = ","),
+      col.names = c("Year", "County", "LWA", "New Estabs", "Pct Chg Y-O-Y"),
+      caption = "Table 2 - Top and Bottom 5 counties by Pct Chg from 2020") %>%
+   kable_classic(full_width = FALSE, html_font = "Cambria", font_size=16)
+```
+
+\newpage
+```{r Table 3: T/B 5 LWAs by new Bus Formations 2021}
+
+kable(x = table3,
+      format.args = list(big.mark = ","),
+      col.names = c("Year", "County", "LWA", "New Estabs"),
+      caption = "Table 3 - Top and Bottom 5 counties by New Bus Applications 2021") %>%
+   kable_classic(full_width = FALSE, html_font = "Cambria", font_size=16)
+```
+
+```{r Table 4: New Establishments by LWA:  2020-2021}
+
+kable(x = table4,
+      format.args = list(big.mark = ","),
+      col.names = c("LWA", "New 2020", "All Estabs EOY 2020", "New 2021", "Pct Chg"),
+      caption = "Table 4 - New Establishments by LWA:  2020-2021") %>%
+   kable_classic(full_width = FALSE, html_font = "Cambria", font_size=16)
+
+```
+\newpage
+### Figure 1
+
+New business applications in Ky by Year and Local Workforce Development Area
 
 ```{r New Business Formation by Year, echo=FALSE}
 ggplot(bfs_ky_df) +
   geom_bar(mapping = aes(x = year, y = new_estab, fill = lwa), stat = "identity")
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
